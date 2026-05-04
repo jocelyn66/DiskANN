@@ -819,6 +819,7 @@ int PQFlashIndex<T, LabelT>::load_from_separate_paths(uint32_t num_threads, cons
     this->_aligned_dim = ROUND_UP(pq_file_dim, 8);
 
     size_t npts_u64, nchunks_u64;
+    // 全量加载pq
 #ifdef EXEC_ENV_OLS
     diskann::load_bin<uint8_t>(files, pq_compressed_vectors, this->data, npts_u64, nchunks_u64);
 #else
@@ -1414,13 +1415,13 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
     std::vector<std::pair<uint32_t, std::pair<uint32_t, uint32_t *>>> cached_nhoods;
     cached_nhoods.reserve(2 * beam_width);
 
-    while (retset.has_unexpanded_node() && num_ios < io_limit)
+    while (retset.has_unexpanded_node() && num_ios < io_limit) // todo io条件
     {
         // clear iteration state
-        frontier.clear();
+        frontier.clear();   // cache miss
         frontier_nhoods.clear();
         frontier_read_reqs.clear();
-        cached_nhoods.clear();
+        cached_nhoods.clear();  // cache hit
         sector_scratch_idx = 0;
         // find new beam
         uint32_t num_seen = 0;
@@ -1428,6 +1429,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
         {
             auto nbr = retset.closest_unexpanded();
             num_seen++;
+            // note 先查_nhood_cache，缓存命中就不用读盘
             auto iter = _nhood_cache.find(nbr.id);
             if (iter != _nhood_cache.end())
             {
@@ -1470,6 +1472,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
                 num_ios++;
             }
             io_timer.reset();
+            // note 未命中的 frontier 组织成一批 AlignedRead，批量读 SSD
 #ifdef USE_BING_INFRA
             reader->read(frontier_read_reqs, ctx,
                          true); // asynhronous reader for Bing.
@@ -1488,6 +1491,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
             auto global_cache_iter = _coord_cache.find(cached_nhood.first);
             T *node_fp_coords_copy = global_cache_iter->second;
             float cur_expanded_dist;
+            // note 求距离: 对已实际读到/缓存的节点，用全精度或 disk-PQ 数据进入 full_retset。
             if (!_use_disk_index_pq)
             {
                 cur_expanded_dist = _dist_cmp->compare(aligned_query_T, node_fp_coords_copy, (uint32_t)_aligned_dim);
@@ -1610,9 +1614,10 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
         hops++;
     }
 
-    // re-sort by distance
+    // re-sort by distance 
     std::sort(full_retset.begin(), full_retset.end());
 
+    // todo 如果启用 reorder，会对 top k * 3 做全精度重排
     if (use_reorder_data)
     {
         if (!(this->_reorder_data_exists))

@@ -1291,6 +1291,7 @@ int build_disk_index(const char *dataFilePath, const char *indexFilePath, const 
 
     if (use_disk_pq)
     {
+        // note 1. 训练 PQ codebook 并生成压缩向量
         generate_disk_quantized_data<T>(data_file_to_use, disk_pq_pivots_path, disk_pq_compressed_vectors_path,
                                         compareMetric, p_val, disk_pq_dims);
     }
@@ -1311,6 +1312,7 @@ int build_disk_index(const char *dataFilePath, const char *indexFilePath, const 
     diskann::cout << "Compressing " << dim << "-dimensional data into " << num_pq_chunks << " bytes per vector."
                   << std::endl;
 
+    // todo
     generate_quantized_data<T>(data_file_to_use, pq_pivots_path, pq_compressed_vectors_path, compareMetric, p_val,
                                num_pq_chunks, use_opq, codebook_prefix);
     diskann::cout << timer.elapsed_seconds_for_step("generating quantized data") << std::endl;
@@ -1322,6 +1324,7 @@ int build_disk_index(const char *dataFilePath, const char *indexFilePath, const 
 #endif
     // Whether it is cosine or inner product, we still L2 metric due to the pre-processing.
     timer.reset();
+    // note 2. 构建/分片/合并内存 Vamana 图
     diskann::build_merged_vamana_index<T, LabelT>(data_file_to_use.c_str(), diskann::Metric::L2, L, R, p_val,
                                                   indexing_ram_budget, mem_index_path, medoids_path, centroids_path,
                                                   build_pq_bytes, use_opq, num_threads, use_filters, labels_file_to_use,
@@ -1329,6 +1332,7 @@ int build_disk_index(const char *dataFilePath, const char *indexFilePath, const 
     diskann::cout << timer.elapsed_seconds_for_step("building merged vamana index") << std::endl;
 
     timer.reset();
+    // note 3. 生成磁盘索引布局（如果使用磁盘 PQ，则使用压缩向量文件，否则使用原始数据文件）.节点大体是 [vector coords][neighbor_count][neighbor_ids]，按 4KB sector 对齐。
     if (!use_disk_pq)
     {
         diskann::create_disk_layout<T>(data_file_to_use.c_str(), mem_index_path, disk_index_path);

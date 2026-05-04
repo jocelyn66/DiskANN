@@ -1171,6 +1171,8 @@ void Index<T, TagT, LabelT>::prune_neighbors(const uint32_t location, std::vecto
     prune_neighbors(location, pool, _indexingRange, _indexingMaxC, _indexingAlpha, pruned_list, scratch);
 }
 
+// todo
+// 排序候选、必要时把 PQ 近似距离改回精确距离，再调用判定剪枝
 template <typename T, typename TagT, typename LabelT>
 void Index<T, TagT, LabelT>::prune_neighbors(const uint32_t location, std::vector<Neighbor> &pool, const uint32_t range,
                                              const uint32_t max_candidate_size, const float alpha,
@@ -1313,16 +1315,18 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
 
     diskann::Timer link_timer;
 
-#pragma omp parallel for schedule(dynamic, 2048)
+#pragma omp parallel for schedule(dynamic, 2048)    // note 并行遍历节点
     for (int64_t node_ctr = 0; node_ctr < (int64_t)(visit_order.size()); node_ctr++)
     {
         auto node = visit_order[node_ctr];
 
         // Find and add appropriate graph edges
-        ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);
+        ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);  // todo?
         auto scratch = manager.scratch_space();
         std::vector<uint32_t> pruned_list;
-        if (_filtered_index)
+
+        // 1 找候选并剪枝
+        if (_filtered_index)    // todo ?
         {
             search_for_point_and_prune(node, _indexingQueueSize, pruned_list, scratch, true, _filterIndexingQueueSize);
         }
@@ -1335,11 +1339,13 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
         {
             LockGuard guard(_locks[node]);
 
-            _graph_store->set_neighbours(node, pruned_list);
+            // 2 写出边
+            _graph_store->set_neighbours(node, pruned_list);    
             assert(_graph_store->get_neighbours((location_t)node).size() <= _indexingRange);
         }
 
-        inter_insert(node, pruned_list, scratch);
+        // 3 给邻居补反向边
+        inter_insert(node, pruned_list, scratch);   
 
         if (node_ctr % 100000 == 0)
         {
@@ -1374,6 +1380,7 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
                     dummy_visited.insert(cur_nbr);
                 }
             }
+            // 把度数超过 R 的节点重新剪一次 // todo 
             prune_neighbors(node, dummy_pool, new_out_neighbors, scratch);
 
             _graph_store->clear_neighbours((location_t)node);
@@ -1557,7 +1564,7 @@ void Index<T, TagT, LabelT>::build_with_data_populated(const std::vector<TagT> &
     }
 
     generate_frozen_point();
-    link();
+    link(); // todo 两次link?
 
     size_t max = 0, min = SIZE_MAX, total = 0, cnt = 0;
     for (size_t i = 0; i < _nd; i++)
@@ -1992,22 +1999,25 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search(const T *query, con
     }
 
     const std::vector<LabelT> unused_filter_label;
+    // 从 medoid/frozen start 初始化候选
     const std::vector<uint32_t> init_ids = get_init_ids();
 
     std::shared_lock<std::shared_timed_mutex> lock(_update_lock);
 
-    _data_store->preprocess_query(query, scratch);
+    _data_store->preprocess_query(query, scratch);   // todo ?
 
+    // 搜图
     auto retval = iterate_to_fixed_point(scratch, L, init_ids, false, unused_filter_label, true);
 
     NeighborPriorityQueue &best_L_nodes = scratch->best_l_nodes();
 
     size_t pos = 0;
+    // 取topk
     for (size_t i = 0; i < best_L_nodes.size(); ++i)
     {
         if (best_L_nodes[i].id < _max_points)
         {
-            // safe because Index uses uint32_t ids internally
+            // safe because Index uses uint32_t ids internally  // todo safe什么意思?
             // and IDType will be uint32_t or uint64_t
             indices[pos] = (IdType)best_L_nodes[i].id;
             if (distances != nullptr)
@@ -2261,7 +2271,7 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
     {
         throw ANNException("ERROR: Can not pick a frozen point since nd=0", -1, __FUNCSIG__, __FILE__, __LINE__);
     }
-    size_t res = calculate_entry_point();
+    size_t res = calculate_entry_point();   // todo
 
     // REFACTOR PQ: Not sure if we should do this for both stores.
     if (_pq_dist)
