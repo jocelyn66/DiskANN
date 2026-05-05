@@ -1,0 +1,116 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug search_disk_index (tiny disk case)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/apps/search_disk_index",
+      "args": [
+        "--data_type",
+        "float",
+        "--dist_fn",
+        "l2",
+        "--index_path_prefix",
+        "${workspaceFolder}/build/debug_case/disk_index",
+        "--result_path",
+        "${workspaceFolder}/build/debug_case/res_debug",
+        "--query_file",
+        "${workspaceFolder}/build/debug_case/query.bin",
+        "--gt_file",
+        "${workspaceFolder}/build/debug_case/gt.bin",
+        "-K",
+        "10",
+        "-L",
+        "20",
+        "-W",
+        "2",
+        "-T",
+        "1",
+        "--num_nodes_to_cache",
+        "64"
+      ],
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "externalConsole": false,
+      "stopAtEntry": false,
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    },
+    {
+      "name": "Debug search_disk_index (1 query)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/apps/search_disk_index",
+      "args": [
+        "--data_type",
+        "float",
+        "--dist_fn",
+        "l2",
+        "--index_path_prefix",
+        "${workspaceFolder}/build/debug_case/disk_index",
+        "--result_path",
+        "${workspaceFolder}/build/debug_case/res_query1_debug",
+        "--query_file",
+        "${workspaceFolder}/build/debug_case/query1.bin",
+        "--gt_file",
+        "${workspaceFolder}/build/debug_case/gt1.bin",
+        "-K",
+        "10",
+        "-L",
+        "20",
+        "-W",
+        "2",
+        "-T",
+        "1",
+        "--num_nodes_to_cache",
+        "64"
+      ],
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "externalConsole": false,
+      "stopAtEntry": false,
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    },
+    {
+      "name": "Debug diskann-benchmark (small filter)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--package",
+          "diskann-benchmark"
+        ],
+        "filter": {
+          "name": "diskann-benchmark",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "run",
+        "--input-file",
+        "./diskann-benchmark/example/async-filter-ground-truth-small.json",
+        "--output-file",
+        "output-debug.json"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    }
+  ]
+}

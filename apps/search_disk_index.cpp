@@ -207,6 +207,7 @@ int search_disk_index(diskann::Metric &metric, const std::string &index_path_pre
             continue;
         }
 
+        // beamwidth自适应
         if (beamwidth <= 0)
         {
             diskann::cout << "Tuning beamwidth.." << std::endl;

@@ -1278,7 +1278,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
         throw ANNException("Beamwidth can not be higher than defaults::MAX_N_SECTOR_READS", -1, __FUNCSIG__, __FILE__,
                            __LINE__);
 
-    ScratchStoreManager<SSDThreadData<T>> manager(this->_thread_data);
+    ScratchStoreManager<SSDThreadData<T>> manager(this->_thread_data);  // todo?
     auto data = manager.scratch_space();
     IOContext &ctx = data->ctx;
     auto query_scratch = &(data->scratch);
@@ -1326,10 +1326,10 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
     }
 
     // pointers to buffers for data
-    T *data_buf = query_scratch->coord_scratch;
-    _mm_prefetch((char *)data_buf, _MM_HINT_T1);
+    T *data_buf = query_scratch->coord_scratch; // todo ?
+    _mm_prefetch((char *)data_buf, _MM_HINT_T1);    // note:performance improvement by prefetching to L2 cache
 
-    // sector scratch
+    // sector scratch // todo ?
     char *sector_scratch = query_scratch->sector_scratch;
     uint64_t &sector_scratch_idx = query_scratch->sector_idx;
     const uint64_t num_sectors_per_node =
@@ -1358,6 +1358,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
     retset.reserve(l_search);
     std::vector<Neighbor> &full_retset = query_scratch->full_retset;
 
+    // 入口点
     uint32_t best_medoid = 0;
     float best_dist = (std::numeric_limits<float>::max)();
     if (!use_filter)
@@ -1415,14 +1416,15 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
     std::vector<std::pair<uint32_t, std::pair<uint32_t, uint32_t *>>> cached_nhoods;
     cached_nhoods.reserve(2 * beam_width);
 
+    // iteration
     while (retset.has_unexpanded_node() && num_ios < io_limit) // todo io条件
     {
         // clear iteration state
         frontier.clear();   // cache miss
-        frontier_nhoods.clear();
-        frontier_read_reqs.clear();
-        cached_nhoods.clear();  // cache hit
-        sector_scratch_idx = 0;
+        frontier_nhoods.clear();    // ?
+        frontier_read_reqs.clear(); // ?
+        cached_nhoods.clear();  // cache hit, <n, 边表>
+        sector_scratch_idx = 0; // 用于追踪 sector_scratch 缓冲区当前写入的偏移，保证每个节点的邻域数据都写入到正确的内存位置，实现批量 IO 读写的内存管理。
         // find new beam
         uint32_t num_seen = 0;
         while (retset.has_unexpanded_node() && frontier.size() < beam_width && num_seen < beam_width)
@@ -1449,7 +1451,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
             }
         }
 
-        // read nhoods of frontier ids
+        // read nhoods of frontier ids 读边表
         if (!frontier.empty())
         {
             if (stats != nullptr)
@@ -1459,6 +1461,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
                 auto id = frontier[i];
                 std::pair<uint32_t, char *> fnhood;
                 fnhood.first = id;
+                // todo
                 fnhood.second = sector_scratch + num_sectors_per_node * sector_scratch_idx * defaults::SECTOR_LEN;
                 sector_scratch_idx++;
                 frontier_nhoods.push_back(fnhood);
@@ -1511,18 +1514,18 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
 
             // compute node_nbrs <-> query dists in PQ space
             cpu_timer.reset();
-            compute_dists(node_nbrs, nnbrs, dist_scratch);
+            compute_dists(node_nbrs, nnbrs, dist_scratch);  // note 批量计算
             if (stats != nullptr)
             {
                 stats->n_cmps += (uint32_t)nnbrs;
                 stats->cpu_us += (float)cpu_timer.elapsed();
             }
 
-            // process prefetched nhood
+            // process prefetched nhood 扩展边
             for (uint64_t m = 0; m < nnbrs; ++m)
             {
                 uint32_t id = node_nbrs[m];
-                if (visited.insert(id).second)
+                if (visited.insert(id).second)  //未遍历
                 {
                     if (!use_filter && _dummy_pts.find(id) != _dummy_pts.end())
                         continue;
@@ -1547,16 +1550,16 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
         {
             assert(completedIndex >= 0);
             auto &frontier_nhood = frontier_nhoods[completedIndex];
-            (*ctx.m_pRequestsStatus)[completedIndex] = IOContext::PROCESS_COMPLETE;
+            (*ctx.m_pRequestsStatus)[completedIndex] = IOContext::PROCESS_COMPLETE;   // todo?
 #else
         for (auto &frontier_nhood : frontier_nhoods)
         {
 #endif
-            char *node_disk_buf = offset_to_node(frontier_nhood.second, frontier_nhood.first);
-            uint32_t *node_buf = offset_to_node_nhood(node_disk_buf);
+            char *node_disk_buf = offset_to_node(frontier_nhood.second, frontier_nhood.first);  // todo ?
+            uint32_t *node_buf = offset_to_node_nhood(node_disk_buf);   // todo 这两个连续存储吗?
             uint64_t nnbrs = (uint64_t)(*node_buf);
             T *node_fp_coords = offset_to_node_coords(node_disk_buf);
-            memcpy(data_buf, node_fp_coords, _disk_bytes_per_point);
+            memcpy(data_buf, node_fp_coords, _disk_bytes_per_point);    // 为啥拷贝?
             float cur_expanded_dist;
             if (!_use_disk_index_pq)
             {
@@ -1569,7 +1572,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
                 else
                     cur_expanded_dist = _disk_pq_table.l2_distance(query_float, (uint8_t *)data_buf);
             }
-            full_retset.push_back(Neighbor(frontier_nhood.first, cur_expanded_dist));
+            full_retset.push_back(Neighbor(frontier_nhood.first, cur_expanded_dist));   // 全精度距离
             uint32_t *node_nbrs = (node_buf + 1);
             // compute node_nbrs <-> query dist in PQ space
             cpu_timer.reset();
@@ -1630,7 +1633,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
 
         std::vector<AlignedRead> vec_read_reqs;
 
-        if (full_retset.size() > k_search * FULL_PRECISION_REORDER_MULTIPLIER)
+        if (full_retset.size() > k_search * FULL_PRECISION_REORDER_MULTIPLIER)  // note guc
             full_retset.erase(full_retset.begin() + k_search * FULL_PRECISION_REORDER_MULTIPLIER, full_retset.end());
 
         for (size_t i = 0; i < full_retset.size(); ++i)
